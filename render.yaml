@@ -1,0 +1,30 @@
+services:
+  - type: web
+    name: project11-api
+    runtime: node
+    region: singapore
+    plan: free
+    rootDir: backend
+    buildCommand: npm ci
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: MONGO_URI
+        sync: false
+      - key: MONGO_DB_NAME
+        value: food_rescue
+      - key: JWT_SECRET
+        generateValue: true
+
+  - type: web
+    name: project11-web
+    runtime: static
+    rootDir: Frontend
+    buildCommand: npm ci && npm run build
+    staticPublishPath: dist
+    envVars:
+      - key: VITE_API_URL
+        fromService:
+          type: web
+          name: project11-api
+          envVarKey: RENDER_EXTERNAL_URL
