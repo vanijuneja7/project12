@@ -96,6 +96,15 @@ const UserSchema = new mongoose.Schema(
       type: Number,
       default: 72.8777, // Default Mumbai lng
     },
+    activeDonationId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Donation',
+      default: null,
+    },
+    activeDonationLockedAt: {
+      type: Date,
+      default: null,
+    },
   },
   { timestamps: true }
 );

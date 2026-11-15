@@ -804,50 +804,14 @@ export const api = {
 
   // Donations
   createDonation: async (donationData) => {
-    try {
-      const res = await fetch(`${API_BASE_URL}/donations`, {
-        method: 'POST',
-        headers: getAuthHeaders(),
-        body: JSON.stringify(donationData),
-      });
-      if (res.ok) return await res.json();
-    } catch (err) {
-      console.warn('Backend unavailable, saving donation locally:', err);
-    }
-    const localUser = getLocalUser();
-    const newDonation = {
-      _id: 'don_' + Date.now(),
-      foodType: donationData.foodType,
-      foodCategory: donationData.foodCategory || 'Cooked Meal',
-      quantity: Number(donationData.quantity),
-      quantityUnit: donationData.quantityUnit || 'servings',
-      foodAge: donationData.foodAge,
-      imageUrl: donationData.imageUrl,
-      notes: donationData.notes,
-      packagingProvidedByNgo: true,
-      status: 'pending',
-      createdAt: new Date().toISOString(),
-      donor: {
-        _id: localUser?._id || localUser?.id,
-        name: localUser?.name || 'Hostel Mess',
-        donorType: localUser?.donorType || 'Hostel Mess',
-        phone: localUser?.phone || '',
-        city: localUser?.city || 'Mumbai',
-        address: localUser?.address || '',
-      },
-      assignedNgo: donationData.assignedNgoId
-        ? {
-            _id: donationData.assignedNgoId,
-            name: 'Bal Asha Child Care Home & Orphanage',
-            city: localUser?.city || 'Mumbai',
-          }
-        : null,
-    };
-    saveLocalDonations([...getLocalDonations(), newDonation]);
-    return {
-      message: 'Surplus food request posted successfully (Demo Mode)!',
-      donation: newDonation,
-    };
+    const res = await fetch(`${API_BASE_URL}/donations`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(donationData),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.message || 'Unable to create the donation request.');
+    return data;
   },
 
   getMyDonations: async () => {
@@ -978,70 +942,33 @@ export const api = {
   },
 
   acceptDonation: async (id) => {
-    try {
-      const res = await fetch(`${API_BASE_URL}/donations/${id}/accept`, {
-        method: 'PUT',
-        headers: getAuthHeaders(),
-      });
-      if (res.ok) return await res.json();
-    } catch (err) {
-      console.warn('Backend unavailable, accepting locally:', err);
-    }
-    const donations = getLocalDonations();
-    const index = donations.findIndex((donation) => donation._id === id);
-    if (index !== -1) {
-      const localUser = getLocalUser();
-      donations[index] = {
-        ...donations[index],
-        status: 'accepted',
-        assignedNgo: {
-          _id: localUser?._id || localUser?.id,
-          name: localUser?.name || 'NGO Shelter',
-          phone: localUser?.phone || '',
-          city: localUser?.city || '',
-          address: localUser?.address || '',
-        },
-      };
-      saveLocalDonations(donations);
-      return { message: 'Request accepted.', donation: donations[index] };
-    }
-    return {
-      message: 'Request accepted! Donor contact details and pickup gate unlocked.',
-      donation: {
-        _id: id,
-        status: 'accepted',
-        donor: {
-          name: 'Campus Central Hostel Mess (Hostel 4)',
-          donorType: 'Hostel Mess',
-          phone: '9123456789',
-          address: 'Hostel Block 4, Rear Gate Loading Bay, IIT Campus, Powai, Mumbai',
-          city: 'Mumbai',
-        },
-      },
-    };
+    const res = await fetch(`${API_BASE_URL}/donations/${id}/accept`, {
+      method: 'PUT',
+      headers: getAuthHeaders(),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.message || 'Unable to accept this request.');
+    return data;
   },
 
   declineDonation: async (id) => {
-    try {
-      const res = await fetch(`${API_BASE_URL}/donations/${id}/decline`, {
-        method: 'PUT',
-        headers: getAuthHeaders(),
-      });
-      if (res.ok) return await res.json();
-    } catch (err) {
-      console.warn('Backend unavailable, declining locally:', err);
-    }
-    const donations = getLocalDonations();
-    const index = donations.findIndex((donation) => donation._id === id);
-    if (index !== -1) {
-      donations[index] = { ...donations[index], status: 'declined', assignedNgo: null };
-      saveLocalDonations(donations);
-      return { message: 'Request declined.', donation: donations[index] };
-    }
-    return {
-      message: 'Request declined.',
-      donation: { _id: id, status: 'declined' },
-    };
+    const res = await fetch(`${API_BASE_URL}/donations/${id}/decline`, {
+      method: 'PUT',
+      headers: getAuthHeaders(),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.message || 'Unable to decline this request.');
+    return data;
+  },
+
+  completeDonation: async (id) => {
+    const res = await fetch(`${API_BASE_URL}/donations/${id}/complete`, {
+      method: 'PUT',
+      headers: getAuthHeaders(),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.message || 'Unable to complete this request.');
+    return data;
   },
 
   // AI Recommendations

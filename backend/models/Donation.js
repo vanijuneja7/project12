@@ -56,6 +56,10 @@ const DonationSchema = new mongoose.Schema(
       enum: ['pending', 'accepted', 'declined', 'completed'],
       default: 'pending',
     },
+    acceptanceTravelMinutes: {
+      type: Number,
+      default: null,
+    },
   },
   { timestamps: true }
 );

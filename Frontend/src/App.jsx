@@ -216,6 +216,8 @@ export default function App() {
   const [aiSuggestions, setAiSuggestions] = useState([]);
   const [selectedNgo, setSelectedNgo] = useState(null);
   const [loadingAi, setLoadingAi] = useState(false);
+  const [submittingDonation, setSubmittingDonation] = useState(false);
+  const [processingRequestId, setProcessingRequestId] = useState(null);
   const [message, setMessage] = useState('');
 
   useEffect(() => {
@@ -391,13 +393,19 @@ export default function App() {
   // Donor Submit Food Request
   const handleCreateDonation = async (e) => {
     e.preventDefault();
+    if (submittingDonation || hasActiveDonation) {
+      setMessage('You already have an active request. Complete it or wait for it to be declined before posting another.');
+      return;
+    }
+    setSubmittingDonation(true);
+    setMessage('');
     try {
       const res = await api.createDonation({
         ...donationForm,
         assignedNgoId: selectedNgo ? selectedNgo.ngoId : null,
       });
       if (res.donation) {
-        setMessage('Surplus food request posted successfully.');
+        setMessage(res.message || 'Surplus food request posted successfully.');
         loadDonorDonations();
         loadMapMarkers();
         setAiSuggestions([]);
@@ -413,22 +421,59 @@ export default function App() {
         });
       }
     } catch (err) {
-      setMessage('Error creating donation request.');
+      setMessage(err.message || 'Error creating donation request.');
+    } finally {
+      setSubmittingDonation(false);
     }
   };
 
   const handleAccept = async (id) => {
-    const res = await api.acceptDonation(id);
-    if (res.donation) {
-      loadNgoFeed();
-      loadMapMarkers();
+    if (processingRequestId) return;
+    setProcessingRequestId(id);
+    setMessage('');
+    try {
+      const res = await api.acceptDonation(id);
+      setMessage(res.message || 'Request accepted.');
+      if (res.donation) {
+        loadNgoFeed();
+        loadMapMarkers();
+      }
+    } catch (err) {
+      setMessage(err.message || 'Unable to accept this request.');
+    } finally {
+      setProcessingRequestId(null);
     }
   };
 
   const handleDecline = async (id) => {
-    const res = await api.declineDonation(id);
-    if (res.donation) {
-      loadNgoFeed();
+    if (processingRequestId) return;
+    setProcessingRequestId(id);
+    setMessage('');
+    try {
+      const res = await api.declineDonation(id);
+      setMessage(res.message || 'Request declined.');
+      if (res.donation) loadNgoFeed();
+    } catch (err) {
+      setMessage(err.message || 'Unable to decline this request.');
+    } finally {
+      setProcessingRequestId(null);
+    }
+  };
+
+  const handleComplete = async (id) => {
+    if (processingRequestId) return;
+    setProcessingRequestId(id);
+    setMessage('');
+    try {
+      const res = await api.completeDonation(id);
+      setMessage(res.message || 'Request marked complete.');
+      if (user?.role === 'donor') loadDonorDonations();
+      else loadNgoFeed();
+      loadMapMarkers();
+    } catch (err) {
+      setMessage(err.message || 'Unable to complete this request.');
+    } finally {
+      setProcessingRequestId(null);
     }
   };
 
@@ -460,6 +505,9 @@ export default function App() {
 
   const dashboardRequests = user?.role === 'donor' ? myDonations : ngoFeed;
   const acceptedRequestCount = dashboardRequests.filter((item) => item.status === 'accepted').length;
+  const hasActiveDonation = user?.role === 'donor' && myDonations.some((item) =>
+    ['pending', 'accepted'].includes(item.status)
+  );
 
   return (
     <div className="app-shell" data-theme={theme}>
@@ -1927,6 +1975,12 @@ export default function App() {
                     List leftover food from hostel mess, hotel buffet, or restaurant
                   </p>
 
+                  {hasActiveDonation && (
+                    <div style={{ marginBottom: 16, padding: '11px 13px', borderRadius: 8, background: '#fff7ed', color: '#9a3412', fontSize: '0.88rem' }}>
+                      You already have an active request. You can post another after this one is declined or marked complete.
+                    </div>
+                  )}
+
                   <form onSubmit={handleCreateDonation}>
                     <div className="form-group">
                       <label>Dietary Type</label>
@@ -2070,8 +2124,13 @@ export default function App() {
                       </div>
                     )}
 
-                    <button type="submit" className="btn btn-primary" style={{ width: '100%', padding: '12px' }}>
-                      Submit Food Donation Request
+                    <button
+                      type="submit"
+                      className="btn btn-primary"
+                      style={{ width: '100%', padding: '12px' }}
+                      disabled={submittingDonation || hasActiveDonation}
+                    >
+                      {submittingDonation ? 'Submitting Request…' : hasActiveDonation ? 'Active Request Already Posted' : 'Submit Food Donation Request'}
                     </button>
                   </form>
                 </div>
@@ -2132,12 +2191,23 @@ export default function App() {
                             <p style={{ marginTop: 6 }}>NGO Name: <strong>{item.assignedNgo?.name}</strong></p>
                             <p>Phone Number: <strong>{item.assignedNgo?.phone || 'Not provided'}</strong></p>
                             <p>Address: {item.assignedNgo?.address}, {item.assignedNgo?.city}</p>
+                            {item.acceptanceTravelMinutes != null && (
+                              <p>Estimated drive: <strong>{item.acceptanceTravelMinutes} minutes</strong></p>
+                            )}
                             <button
                               className="btn btn-secondary btn-sm"
                               style={{ marginTop: 8, display: 'inline-flex', alignItems: 'center', gap: 6 }}
                               onClick={() => openExternalGoogleMap(`${item.assignedNgo?.name || 'NGO'}, ${item.assignedNgo?.city || user.city}`)}
                             >
                               <IconNavigation /> Navigate to Shelter in Google Maps
+                            </button>
+                            <button
+                              className="btn btn-secondary btn-sm"
+                              style={{ marginTop: 8, width: '100%' }}
+                              onClick={() => handleComplete(item._id)}
+                              disabled={processingRequestId === item._id}
+                            >
+                              {processingRequestId === item._id ? 'Updating…' : 'Mark Pickup Complete'}
                             </button>
                           </div>
                         ) : (
@@ -2256,12 +2326,23 @@ export default function App() {
                           </strong>
                           <p style={{ marginTop: 6 }}>Donor Phone: <strong>{item.donor?.phone || '9123456789'}</strong></p>
                           <p>Full Pickup Address: <strong>{item.donor?.address}</strong></p>
+                          {item.acceptanceTravelMinutes != null && (
+                            <p>Estimated drive: <strong>{item.acceptanceTravelMinutes} minutes</strong></p>
+                          )}
                           <button
                             className="btn btn-primary"
                             style={{ marginTop: 10, width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
                             onClick={() => openExternalGoogleMap(`${item.donor?.name || 'Mess'}, ${item.donor?.address}, ${item.donor?.city}`)}
                           >
                             <IconNavigation /> Start Google Maps Navigation to Mess
+                          </button>
+                          <button
+                            className="btn btn-secondary"
+                            style={{ marginTop: 8, width: '100%' }}
+                            onClick={() => handleComplete(item._id)}
+                            disabled={processingRequestId === item._id}
+                          >
+                            {processingRequestId === item._id ? 'Updating…' : 'Mark Pickup Complete'}
                           </button>
                         </div>
                       ) : (
@@ -2277,13 +2358,15 @@ export default function App() {
                               className="btn btn-primary"
                               style={{ flex: 1, padding: '11px' }}
                               onClick={() => handleAccept(item._id)}
+                              disabled={processingRequestId === item._id}
                             >
-                              Accept Request
+                              {processingRequestId === item._id ? 'Checking route…' : 'Accept Request (< 2 hours)'}
                             </button>
                             <button
                               className="btn btn-secondary"
                               style={{ flex: 1, padding: '11px' }}
                               onClick={() => handleDecline(item._id)}
+                              disabled={processingRequestId === item._id}
                             >
                               Decline
                             </button>
