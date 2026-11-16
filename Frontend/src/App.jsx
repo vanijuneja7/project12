@@ -418,7 +418,7 @@ export default function App() {
   const handleCreateDonation = async (e) => {
     e.preventDefault();
     if (submittingDonation || hasActiveDonation) {
-      setMessage('You already have an active request. Complete it or wait for it to be declined before posting another.');
+      setMessage('You already have an active request. Mark it complete before posting another.');
       return;
     }
     setSubmittingDonation(true);
@@ -2001,7 +2001,7 @@ export default function App() {
 
                   {hasActiveDonation && (
                     <div style={{ marginBottom: 16, padding: '11px 13px', borderRadius: 8, background: '#fff7ed', color: '#9a3412', fontSize: '0.88rem' }}>
-                      You already have an active request. You can post another after this one is declined or marked complete.
+                      You already have an active request. You can post another after this one is marked complete.
                     </div>
                   )}
 
