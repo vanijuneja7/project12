@@ -484,6 +484,30 @@ export default function App() {
     }
   };
 
+  const handleRetake = async (id) => {
+    try {
+      const res = await api.retakeDonation(id);
+      setMessage(res.message || 'Request is back in your feed.');
+      await loadNgoFeed();
+    } catch (err) {
+      setMessage(err.message || 'Unable to retake this request.');
+    }
+  };
+
+  const handleWithdraw = async (id) => {
+    if (!window.confirm('Withdraw this food request?')) return;
+    setProcessingRequestId(id);
+    try {
+      const res = await api.withdrawDonation(id);
+      setMessage(res.message || 'Request withdrawn.');
+      await loadDonorDonations();
+    } catch (err) {
+      setMessage(err.message || 'Unable to withdraw this request.');
+    } finally {
+      setProcessingRequestId(null);
+    }
+  };
+
   const handleComplete = async (id) => {
     if (processingRequestId) return;
     setProcessingRequestId(id);
@@ -2207,6 +2231,11 @@ export default function App() {
                           </p>
                         )}
 
+                        {item.status === 'pending' && item.assignedNgo == null ? (
+                          <button className="btn btn-secondary" style={{ marginTop: 12, width: '100%' }} onClick={() => handleWithdraw(item._id)} disabled={processingRequestId === item._id}>
+                            Withdraw Request
+                          </button>
+                        ) : null}
                         {item.status === 'accepted' ? (
                           <div className="privacy-box privacy-unlocked">
                             <strong style={{ color: '#065f46', display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -2348,7 +2377,11 @@ export default function App() {
                         </p>
                       )}
 
-                      {item.status === 'accepted' ? (
+                      {item.declinedBy?.some((ngo) => (ngo._id || ngo) === user._id) ? (
+                        <button className="btn btn-primary" style={{ marginTop: 14, width: '100%' }} onClick={() => handleRetake(item._id)}>
+                          Retake Request
+                        </button>
+                      ) : item.status === 'accepted' ? (
                         <div className="privacy-box privacy-unlocked" style={{ marginTop: 14 }}>
                           <strong style={{ color: '#065f46', display: 'flex', alignItems: 'center', gap: 6 }}>
                             <IconCheck /> You Accepted This Request

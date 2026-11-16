@@ -961,6 +961,23 @@ export const api = {
     return data;
   },
 
+  retakeDonation: async (id) => {
+    const res = await fetch(`${API_BASE_URL}/donations/${id}/retake`, {
+      method: 'PUT',
+      headers: getAuthHeaders(),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.message || 'Unable to retake this request.');
+    return data;
+  },
+
+  withdrawDonation: async (id) => {
+    const res = await fetch(`${API_BASE_URL}/donations/${id}/withdraw`, { method: 'PUT', headers: getAuthHeaders() });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.message || 'Unable to withdraw request.');
+    return data;
+  },
+
   completeDonation: async (id) => {
     const res = await fetch(`${API_BASE_URL}/donations/${id}/complete`, {
       method: 'PUT',

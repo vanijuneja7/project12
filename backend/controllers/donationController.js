@@ -215,10 +215,10 @@ exports.getNgoFeed = async (req, res) => {
       $and: [
         { $or: [{ assignedNgo: req.user.id }, { assignedNgo: null }] },
         { status: { $in: ['pending', 'accepted'] } },
-        { declinedBy: { $ne: req.user.id } },
       ],
     })
       .populate('donor', 'name email phone address city donorType')
+      .populate('declinedBy', 'name')
       .sort({ createdAt: -1 });
 
     // Privacy rule: Only reveal donor's phone number & exact address if status is 'accepted'
@@ -353,6 +353,40 @@ exports.declineDonation = async (req, res) => {
     });
   } catch (error) {
     res.status(500).json({ message: 'Server error declining donation.' });
+  }
+};
+
+// @desc    Reopen a previously declined request in this NGO's feed
+// @route   PUT /api/donations/:id/retake
+// @access  Private (NGO only)
+exports.retakeDonation = async (req, res) => {
+  try {
+    if (req.user.role !== 'ngo') return res.status(403).json({ message: 'Only NGOs can retake requests.' });
+    const donation = await Donation.findOneAndUpdate(
+      { _id: req.params.id, status: 'pending', assignedNgo: null, declinedBy: req.user.id },
+      { $pull: { declinedBy: req.user.id } },
+      { new: true }
+    );
+    if (!donation) return res.status(409).json({ message: 'This request is no longer available to retake.' });
+    res.json({ message: 'Request is back in your feed and available to accept.', donation });
+  } catch (error) {
+    res.status(500).json({ message: 'Unable to retake this request.' });
+  }
+};
+
+exports.withdrawDonation = async (req, res) => {
+  try {
+    if (req.user.role !== 'donor') return res.status(403).json({ message: 'Only donors can withdraw requests.' });
+    const donation = await Donation.findOneAndUpdate(
+      { _id: req.params.id, donor: req.user.id, status: 'pending', assignedNgo: null },
+      { $set: { status: 'withdrawn' }, $unset: { assignedNgo: 1 } },
+      { new: true }
+    );
+    if (!donation) return res.status(409).json({ message: 'Only open, unaccepted requests can be withdrawn.' });
+    await releaseDonationSlot(donation.donor, donation._id);
+    res.json({ message: 'Request withdrawn.', donation });
+  } catch (error) {
+    res.status(500).json({ message: 'Unable to withdraw this request.' });
   }
 };
 

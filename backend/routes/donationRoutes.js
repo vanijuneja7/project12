@@ -7,6 +7,8 @@ const {
   getNgoFeed,
   acceptDonation,
   declineDonation,
+  retakeDonation,
+  withdrawDonation,
   completeDonation,
   getPublicMapMarkers,
 } = require('../controllers/donationController');
@@ -25,6 +27,8 @@ router.get('/my-donations', getMyDonations);
 router.get('/ngo-feed', getNgoFeed);
 router.put('/:id/accept', acceptDonation);
 router.put('/:id/decline', declineDonation);
+router.put('/:id/retake', retakeDonation);
+router.put('/:id/withdraw', withdrawDonation);
 router.put('/:id/complete', completeDonation);
 
 module.exports = router;
