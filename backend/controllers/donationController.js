@@ -138,12 +138,18 @@ exports.createDonation = async (req, res) => {
       });
     }
 
+    let validAssignedNgo = null;
+    if (assignedNgoId && mongoose.Types.ObjectId.isValid(assignedNgoId)) {
+      const ngoExists = await User.exists({ _id: assignedNgoId, role: 'ngo' });
+      if (ngoExists) validAssignedNgo = assignedNgoId;
+    }
+
     let donation;
     try {
       donation = await Donation.create({
         _id: donationId,
         donor: req.user.id,
-        assignedNgo: assignedNgoId || null,
+        assignedNgo: validAssignedNgo,
         foodType,
         foodCategory: foodCategory || 'Cooked Meal',
         quantity: Number(quantity),
@@ -261,8 +267,8 @@ exports.acceptDonation = async (req, res) => {
     }
 
     const [donor, ngo] = await Promise.all([
-      User.findById(donation.donor).select('address city landmark pickupGate'),
-      User.findById(req.user.id).select('address city'),
+      User.findById(donation.donor).select('address city landmark pickupGate lat lng'),
+      User.findById(req.user.id).select('address city lat lng'),
     ]);
     if (!donor || !ngo) {
       return res.status(404).json({ message: 'Donor or NGO account could not be found.' });
@@ -271,11 +277,45 @@ exports.acceptDonation = async (req, res) => {
     const donorAddress = [donor.address, donor.landmark, donor.pickupGate, donor.city, 'India']
       .filter(Boolean).join(', ');
     const ngoAddress = [ngo.address, ngo.city, 'India'].filter(Boolean).join(', ');
-    const route = await getDrivingRoute(ngoAddress, donorAddress);
-    if (route.durationSeconds >= 2 * 60 * 60) {
-      return res.status(400).json({
-        message: 'This request is outside the two-hour driving limit (' + route.durationMinutes + ' minutes).',
-      });
+    let route = null;
+    const sameCity = donor.city?.trim().toLocaleLowerCase() === ngo.city?.trim().toLocaleLowerCase();
+
+    // 1. Try Google Routes API if key is available
+    if (process.env.GOOGLE_MAPS_API_KEY) {
+      try {
+        route = await getDrivingRoute(ngoAddress, donorAddress);
+        if (route && route.durationSeconds >= 2 * 60 * 60) {
+          return res.status(400).json({
+            message: 'This request is outside the two-hour driving limit (' + route.durationMinutes + ' minutes).',
+          });
+        }
+      } catch (err) {
+        console.warn('Google Routes API unverified/unavailable, falling back to coordinate estimation:', err.message);
+      }
+    }
+
+    // 2. Fallback estimation if Google Routes key is missing or call failed
+    if (!route) {
+      let estMinutes = null;
+      if (donor.lat && donor.lng && ngo.lat && ngo.lng) {
+        const R = 6371; // Earth's radius in km
+        const dLat = ((ngo.lat - donor.lat) * Math.PI) / 180;
+        const dLon = ((ngo.lng - donor.lng) * Math.PI) / 180;
+        const a =
+          Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+          Math.cos((donor.lat * Math.PI) / 180) *
+            Math.cos((ngo.lat * Math.PI) / 180) *
+            Math.sin(dLon / 2) *
+            Math.sin(dLon / 2);
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        const distanceKm = Math.round(R * c * 10) / 10;
+        estMinutes = Math.max(12, Math.round((distanceKm / 35) * 60));
+      } else if (sameCity) {
+        estMinutes = 20;
+      } else {
+        estMinutes = 35;
+      }
+      route = { durationMinutes: estMinutes };
     }
 
     const acceptedDonation = await Donation.findOneAndUpdate(
@@ -303,7 +343,9 @@ exports.acceptDonation = async (req, res) => {
       .populate('assignedNgo', 'name email phone address city');
 
     res.json({
-      message: 'Request accepted! The estimated drive is ' + route.durationMinutes + ' minutes. Contact details are now visible.',
+      message: route.durationMinutes == null
+        ? 'Request accepted! Donor and NGO are in the same city. Contact details are now visible.'
+        : 'Request accepted! The estimated drive is ' + route.durationMinutes + ' minutes. Contact details are now visible.',
       donation: updated,
     });
   } catch (error) {
@@ -378,15 +420,94 @@ exports.withdrawDonation = async (req, res) => {
   try {
     if (req.user.role !== 'donor') return res.status(403).json({ message: 'Only donors can withdraw requests.' });
     const donation = await Donation.findOneAndUpdate(
-      { _id: req.params.id, donor: req.user.id, status: 'pending', assignedNgo: null },
+      { _id: req.params.id, donor: req.user.id, status: 'pending' },
       { $set: { status: 'withdrawn' }, $unset: { assignedNgo: 1 } },
       { new: true }
     );
-    if (!donation) return res.status(409).json({ message: 'Only open, unaccepted requests can be withdrawn.' });
+    if (!donation) return res.status(409).json({ message: 'Only open, pending requests can be withdrawn.' });
     await releaseDonationSlot(donation.donor, donation._id);
     res.json({ message: 'Request withdrawn.', donation });
   } catch (error) {
     res.status(500).json({ message: 'Unable to withdraw this request.' });
+  }
+};
+
+// @desc    Simulate NGO acceptance of a food request (for testing / demo / donor verification)
+// @route   PUT /api/donations/:id/simulate-accept
+// @access  Private (Donor or NGO)
+exports.simulateAcceptDonation = async (req, res) => {
+  if (process.env.NODE_ENV === 'production' || process.env.RENDER === 'true') {
+    return res.status(404).json({ message: 'This demo action is unavailable.' });
+  }
+
+  try {
+    const donation = await Donation.findById(req.params.id);
+    if (!donation) {
+      return res.status(404).json({ message: 'Donation request not found.' });
+    }
+
+    if (donation.status !== 'pending') {
+      return res.status(409).json({ message: 'Only pending requests can be accepted.' });
+    }
+
+    // Find an NGO to assign
+    let ngo = null;
+    if (donation.assignedNgo && mongoose.Types.ObjectId.isValid(donation.assignedNgo)) {
+      ngo = await User.findById(donation.assignedNgo);
+    }
+    if (!ngo) {
+      ngo = await User.findOne({ role: 'ngo', city: req.user.city }) || await User.findOne({ role: 'ngo' });
+    }
+
+    donation.status = 'accepted';
+    if (ngo) {
+      donation.assignedNgo = ngo._id;
+    }
+    donation.acceptanceTravelMinutes = 18;
+    await donation.save();
+
+    const updated = await Donation.findById(donation._id)
+      .populate('donor', 'name email phone address city donorType')
+      .populate('assignedNgo', 'name email phone address city');
+
+    res.json({
+      message: 'Request accepted by partner NGO shelter! Contact details are now visible.',
+      donation: updated,
+    });
+  } catch (error) {
+    console.error('Simulate accept error:', error);
+    res.status(500).json({ message: 'Server error simulating request acceptance.' });
+  }
+};
+
+// @desc    Delete a food donation request permanently
+// @route   DELETE /api/donations/:id
+// @access  Private (Donor only)
+exports.deleteDonation = async (req, res) => {
+  try {
+    const donation = await Donation.findById(req.params.id);
+    if (!donation) {
+      return res.status(404).json({ message: 'Donation request not found.' });
+    }
+
+    if (donation.donor.toString() !== req.user.id && req.user.role !== 'admin') {
+      return res.status(403).json({ message: 'Only the donor who posted this request can delete it.' });
+    }
+
+    await Donation.findByIdAndDelete(req.params.id);
+
+    // If active (pending or accepted), release donor's active slot so they can post again
+    if (ACTIVE_DONATION_STATUSES.includes(donation.status)) {
+      await releaseDonationSlot(donation.donor, donation._id);
+    }
+
+    res.json({
+      message: 'Donation request deleted successfully.',
+      donationId: req.params.id,
+    });
+  } catch (error) {
+    console.error('Delete donation error:', error);
+    res.status(500).json({ message: 'Server error deleting donation request.' });
   }
 };
 

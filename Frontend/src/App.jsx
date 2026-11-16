@@ -403,9 +403,6 @@ export default function App() {
       });
       if (res.suggestions) {
         setAiSuggestions(res.suggestions);
-        if (res.suggestions.length > 0) {
-          setSelectedNgo(res.suggestions[0]);
-        }
       }
     } catch (err) {
       setMessage('Failed to get AI recommendations. Ensure backend is active.');
@@ -503,6 +500,46 @@ export default function App() {
       await loadDonorDonations();
     } catch (err) {
       setMessage(err.message || 'Unable to withdraw this request.');
+    } finally {
+      setProcessingRequestId(null);
+    }
+  };
+
+  const handleDelete = async (id) => {
+    if (!window.confirm('Are you sure you want to delete this donation request permanently?')) return;
+    setProcessingRequestId(id);
+    setMessage('');
+    try {
+      const res = await api.deleteDonation(id);
+      setMessage(res.message || 'Donation request deleted successfully.');
+      if (user?.role === 'donor') {
+        await loadDonorDonations();
+      } else {
+        await loadNgoFeed();
+      }
+      loadMapMarkers();
+    } catch (err) {
+      setMessage(err.message || 'Unable to delete this request.');
+    } finally {
+      setProcessingRequestId(null);
+    }
+  };
+
+  const handleSimulateAccept = async (id) => {
+    if (processingRequestId) return;
+    setProcessingRequestId(id);
+    setMessage('');
+    try {
+      const res = await api.simulateAcceptDonation(id);
+      setMessage(res.message || 'Request accepted by partner NGO shelter!');
+      if (user?.role === 'donor') {
+        await loadDonorDonations();
+      } else {
+        await loadNgoFeed();
+      }
+      loadMapMarkers();
+    } catch (err) {
+      setMessage(err.message || 'Unable to accept this request.');
     } finally {
       setProcessingRequestId(null);
     }
@@ -2144,9 +2181,21 @@ export default function App() {
 
                     {aiSuggestions.length > 0 && (
                       <div style={{ marginBottom: 16 }}>
-                        <label style={{ fontSize: '0.85rem', fontWeight: 800, color: '#4c1d95' }}>
-                          AI Recommended NGO Shelters in {user.city}:
-                        </label>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                          <label style={{ fontSize: '0.85rem', fontWeight: 800, color: '#4c1d95', margin: 0 }}>
+                            AI Recommended NGO Shelters in {user.city}:
+                          </label>
+                          {selectedNgo && (
+                            <button
+                              type="button"
+                              className="btn btn-secondary btn-sm"
+                              style={{ padding: '3px 8px', fontSize: '0.75rem' }}
+                              onClick={() => setSelectedNgo(null)}
+                            >
+                              Clear Selection (Open to All)
+                            </button>
+                          )}
+                        </div>
                         {aiSuggestions.map((ngo) => (
                           <div
                             key={ngo.ngoId}
@@ -2155,7 +2204,7 @@ export default function App() {
                               border: selectedNgo?.ngoId === ngo.ngoId ? '2px solid #7c3aed' : '1px solid #e9d5ff',
                               cursor: 'pointer',
                             }}
-                            onClick={() => setSelectedNgo(ngo)}
+                            onClick={() => setSelectedNgo(selectedNgo?.ngoId === ngo.ngoId ? null : ngo)}
                           >
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                               <strong>{ngo.ngoName}</strong>
@@ -2165,7 +2214,7 @@ export default function App() {
                               {ngo.aiReasoning}
                             </p>
                             <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: 6 }}>
-                              Capacity: {ngo.capacity} servings/day &bull; {selectedNgo?.ngoId === ngo.ngoId ? '[Selected for Direct Dispatch]' : 'Click to select this NGO Shelter'}
+                              Capacity: {ngo.capacity} servings/day &bull; {selectedNgo?.ngoId === ngo.ngoId ? '✓ [Selected for Direct Dispatch - Click to Unselect]' : 'Click to select this NGO exclusively'}
                             </p>
                           </div>
                         ))}
@@ -2231,13 +2280,41 @@ export default function App() {
                           </p>
                         )}
 
-                        {item.status === 'pending' && item.assignedNgo == null ? (
-                          <button className="btn btn-secondary" style={{ marginTop: 12, width: '100%' }} onClick={() => handleWithdraw(item._id)} disabled={processingRequestId === item._id}>
-                            Withdraw Request
-                          </button>
-                        ) : null}
+                        {item.status === 'pending' && (
+                          <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                            <div style={{ display: 'flex', gap: 8 }}>
+                              {import.meta.env.DEV && (
+                                <button
+                                  className="btn btn-primary btn-sm"
+                                  style={{ flex: 1, background: '#059669', borderColor: '#059669', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
+                                  onClick={() => handleSimulateAccept(item._id)}
+                                  disabled={processingRequestId === item._id}
+                                  title="Accept request using partner NGO shelter (Instant test)"
+                                >
+                                  <IconCheck /> Test Accept as NGO
+                                </button>
+                              )}
+                              <button
+                                className="btn btn-secondary btn-sm"
+                                style={{ flex: 1 }}
+                                onClick={() => handleWithdraw(item._id)}
+                                disabled={processingRequestId === item._id}
+                              >
+                                Withdraw
+                              </button>
+                            </div>
+                            <button
+                              className="btn btn-danger btn-sm"
+                              style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
+                              onClick={() => handleDelete(item._id)}
+                              disabled={processingRequestId === item._id}
+                            >
+                              Delete Request
+                            </button>
+                          </div>
+                        )}
                         {item.status === 'accepted' ? (
-                          <div className="privacy-box privacy-unlocked">
+                          <div className="privacy-box privacy-unlocked" style={{ marginTop: 12 }}>
                             <strong style={{ color: '#065f46', display: 'flex', alignItems: 'center', gap: 6 }}>
                               <IconCheck /> Request Accepted by NGO Shelter
                             </strong>
@@ -2262,9 +2339,28 @@ export default function App() {
                             >
                               {processingRequestId === item._id ? 'Updating…' : 'Mark Pickup Complete'}
                             </button>
+                            <button
+                              className="btn btn-danger btn-sm"
+                              style={{ marginTop: 8, width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
+                              onClick={() => handleDelete(item._id)}
+                              disabled={processingRequestId === item._id}
+                            >
+                              Delete Request
+                            </button>
+                          </div>
+                        ) : item.status !== 'pending' ? (
+                          <div style={{ marginTop: 12 }}>
+                            <button
+                              className="btn btn-danger btn-sm"
+                              style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
+                              onClick={() => handleDelete(item._id)}
+                              disabled={processingRequestId === item._id}
+                            >
+                              Delete Request
+                            </button>
                           </div>
                         ) : (
-                          <div className="privacy-box">
+                          <div className="privacy-box" style={{ marginTop: 8 }}>
                             {item.declinedBy?.length > 0 && (
                               <p style={{ marginBottom: 8, color: '#92400e', fontWeight: 600 }}>
                                 Declined by {item.declinedBy.map((ngo) => ngo.name).filter(Boolean).join(', ')}. Your request is still open for other NGOs.
@@ -2274,7 +2370,7 @@ export default function App() {
                               <IconLock /> Mutual Privacy Shield Active
                             </span>
                             <div style={{ marginTop: 4 }}>
-                              Contact phone numbers and addresses unlock automatically when an authorized NGO accepts.
+                              Contact phone numbers and addresses unlock automatically when an authorized NGO accepts.{import.meta.env.DEV ? ' You can also click "Test Accept as NGO" above to test the full handoff workflow.' : ''}
                             </div>
                           </div>
                         )}
@@ -2321,6 +2417,23 @@ export default function App() {
               <div style={{ margin: '0 0 16px', padding: '12px 16px', borderRadius: 10, background: '#ecfdf5', color: '#065f46', fontWeight: 700 }}>
                 The receiving NGO is responsible for bringing food-safe packaging and transport containers for every accepted pickup.
               </div>
+
+              <section className="card" style={{ marginBottom: 22, padding: 16 }}>
+                <h3 style={{ fontSize: '1.05rem', fontWeight: 800, marginBottom: 10 }}>Your NGO location</h3>
+                <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', marginBottom: 12 }}>
+                  {user.address}, {user.city}
+                </p>
+                <iframe
+                  title="Map showing your NGO location"
+                  src={`https://maps.google.com/maps?q=${encodeURIComponent(`${user.address || user.name}, ${user.city}, India`)}&z=13&output=embed`}
+                  width="100%"
+                  height="260"
+                  style={{ border: 0, borderRadius: 10, display: 'block' }}
+                  loading="lazy"
+                  referrerPolicy="no-referrer-when-downgrade"
+                  allowFullScreen
+                />
+              </section>
 
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
                 <div>

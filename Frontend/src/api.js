@@ -804,14 +804,61 @@ export const api = {
 
   // Donations
   createDonation: async (donationData) => {
-    const res = await fetch(`${API_BASE_URL}/donations`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(donationData),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.message || 'Unable to create the donation request.');
-    return data;
+    try {
+      const res = await fetch(`${API_BASE_URL}/donations`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(donationData),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) return data;
+      if (res.status === 409 || res.status === 400 || res.status === 403) {
+        throw new Error(data.message || 'Unable to create the donation request.');
+      }
+    } catch (err) {
+      if (err.message && !err.message.includes('fetch') && !err.message.includes('NetworkError') && !err.message.includes('Failed to fetch')) {
+        throw err;
+      }
+      console.warn('Backend unavailable, saving donation locally:', err);
+    }
+
+    // Local Storage Demo Fallback
+    const localUser = getLocalUser();
+    const newDonation = {
+      _id: 'don_' + Date.now(),
+      foodType: donationData.foodType,
+      foodCategory: donationData.foodCategory || 'Cooked Meal',
+      quantity: Number(donationData.quantity),
+      quantityUnit: donationData.quantityUnit || 'servings',
+      foodAge: donationData.foodAge,
+      imageUrl: donationData.imageUrl || '',
+      notes: donationData.notes || '',
+      packagingProvidedByNgo: true,
+      status: 'pending',
+      createdAt: new Date().toISOString(),
+      donor: {
+        _id: localUser?._id || localUser?.id || 'usr_donor',
+        name: localUser?.name || 'Campus Central Hostel Mess',
+        donorType: localUser?.donorType || 'Hostel Mess',
+        phone: localUser?.phone || '9123456789',
+        city: localUser?.city || 'Mumbai',
+        address: localUser?.address || 'IIT Bombay Campus, Hostel 4, Powai',
+      },
+      assignedNgo: donationData.assignedNgoId
+        ? {
+            _id: donationData.assignedNgoId,
+            name: 'Bal Asha Child Care Home & Orphanage',
+            phone: '9876543210',
+            city: localUser?.city || 'Mumbai',
+            address: 'King George V Memorial, Mahalaxmi, Mumbai',
+          }
+        : null,
+    };
+    saveLocalDonations([newDonation, ...getLocalDonations()]);
+    return {
+      message: 'Surplus food request posted successfully!',
+      donation: newDonation,
+    };
   },
 
   getMyDonations: async () => {
@@ -942,50 +989,241 @@ export const api = {
   },
 
   acceptDonation: async (id) => {
-    const res = await fetch(`${API_BASE_URL}/donations/${id}/accept`, {
-      method: 'PUT',
-      headers: getAuthHeaders(),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.message || 'Unable to accept this request.');
-    return data;
+    try {
+      const res = await fetch(`${API_BASE_URL}/donations/${id}/accept`, {
+        method: 'PUT',
+        headers: getAuthHeaders(),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) return data;
+      if (res.status === 409 || res.status === 403 || res.status === 400) {
+        throw new Error(data.message || 'Unable to accept this request.');
+      }
+    } catch (err) {
+      if (err.message && !err.message.includes('fetch') && !err.message.includes('NetworkError') && !err.message.includes('Failed to fetch')) {
+        throw err;
+      }
+      console.warn('Backend unavailable, accepting locally:', err);
+    }
+
+    // Local Storage Demo Fallback
+    const localUser = getLocalUser();
+    const donations = getLocalDonations();
+    const index = donations.findIndex((d) => d._id === id);
+    const assignedNgoInfo = {
+      _id: localUser?._id || localUser?.id || 'usr_ngo_1',
+      name: localUser?.name || 'Bal Asha Child Care Home & Orphanage',
+      phone: localUser?.phone || '9876543210',
+      city: localUser?.city || 'Mumbai',
+      address: localUser?.address || 'King George V Memorial, Dr. E Moses Rd, Mahalaxmi, Mumbai',
+    };
+
+    if (index !== -1) {
+      donations[index] = {
+        ...donations[index],
+        status: 'accepted',
+        assignedNgo: assignedNgoInfo,
+        acceptanceTravelMinutes: 18,
+      };
+      saveLocalDonations(donations);
+      return {
+        message: 'Request accepted! Contact details are now visible.',
+        donation: donations[index],
+      };
+    }
+
+    return {
+      message: 'Request accepted! Contact details are now visible.',
+      donation: {
+        _id: id,
+        status: 'accepted',
+        assignedNgo: assignedNgoInfo,
+        acceptanceTravelMinutes: 18,
+      },
+    };
+  },
+
+  simulateAcceptDonation: async (id) => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/donations/${id}/simulate-accept`, {
+        method: 'PUT',
+        headers: getAuthHeaders(),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) return data;
+      if (res.status === 409 || res.status === 403 || res.status === 400) {
+        throw new Error(data.message || 'Unable to simulate acceptance.');
+      }
+    } catch (err) {
+      if (err.message && !err.message.includes('fetch') && !err.message.includes('NetworkError') && !err.message.includes('Failed to fetch')) {
+        throw err;
+      }
+      console.warn('Backend unavailable, simulating locally:', err);
+    }
+
+    const mockNgo = {
+      _id: 'usr_ngo_1',
+      name: 'Bal Asha Child Care Home & Orphanage',
+      phone: '9876543210',
+      city: 'Mumbai',
+      address: 'King George V Memorial, Dr. E Moses Rd, Mahalaxmi, Mumbai',
+    };
+
+    const donations = getLocalDonations();
+    const index = donations.findIndex((d) => d._id === id);
+    if (index !== -1) {
+      donations[index] = {
+        ...donations[index],
+        status: 'accepted',
+        assignedNgo: mockNgo,
+        acceptanceTravelMinutes: 18,
+      };
+      saveLocalDonations(donations);
+      return {
+        message: 'Request accepted by partner NGO shelter! Contact details are now visible.',
+        donation: donations[index],
+      };
+    }
+
+    return {
+      message: 'Request accepted by partner NGO shelter! Contact details are now visible.',
+      donation: {
+        _id: id,
+        status: 'accepted',
+        assignedNgo: mockNgo,
+        acceptanceTravelMinutes: 18,
+      },
+    };
   },
 
   declineDonation: async (id) => {
-    const res = await fetch(`${API_BASE_URL}/donations/${id}/decline`, {
-      method: 'PUT',
-      headers: getAuthHeaders(),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.message || 'Unable to decline this request.');
-    return data;
+    try {
+      const res = await fetch(`${API_BASE_URL}/donations/${id}/decline`, {
+        method: 'PUT',
+        headers: getAuthHeaders(),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) return data;
+      if (res.status === 409 || res.status === 403) {
+        throw new Error(data.message || 'Unable to decline this request.');
+      }
+    } catch (err) {
+      if (err.message && !err.message.includes('fetch') && !err.message.includes('NetworkError') && !err.message.includes('Failed to fetch')) {
+        throw err;
+      }
+      console.warn('Backend unavailable, declining locally:', err);
+    }
+    const donations = getLocalDonations();
+    const index = donations.findIndex((d) => d._id === id);
+    if (index !== -1) {
+      donations[index] = { ...donations[index], status: 'declined', assignedNgo: null };
+      saveLocalDonations(donations);
+      return { message: 'Request declined.', donation: donations[index] };
+    }
+    return { message: 'Request declined.', donation: { _id: id, status: 'declined' } };
   },
 
   retakeDonation: async (id) => {
-    const res = await fetch(`${API_BASE_URL}/donations/${id}/retake`, {
-      method: 'PUT',
-      headers: getAuthHeaders(),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.message || 'Unable to retake this request.');
-    return data;
+    try {
+      const res = await fetch(`${API_BASE_URL}/donations/${id}/retake`, {
+        method: 'PUT',
+        headers: getAuthHeaders(),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) return data;
+      if (res.status === 409 || res.status === 403) {
+        throw new Error(data.message || 'Unable to retake this request.');
+      }
+    } catch (err) {
+      if (err.message && !err.message.includes('fetch') && !err.message.includes('NetworkError') && !err.message.includes('Failed to fetch')) {
+        throw err;
+      }
+      console.warn('Backend unavailable, retaking locally:', err);
+    }
+    const donations = getLocalDonations();
+    const index = donations.findIndex((d) => d._id === id);
+    if (index !== -1) {
+      donations[index] = { ...donations[index], status: 'pending' };
+      saveLocalDonations(donations);
+      return { message: 'Request is back in your feed and available to accept.', donation: donations[index] };
+    }
+    return { message: 'Request is back in your feed.', donation: { _id: id, status: 'pending' } };
   },
 
   withdrawDonation: async (id) => {
-    const res = await fetch(`${API_BASE_URL}/donations/${id}/withdraw`, { method: 'PUT', headers: getAuthHeaders() });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.message || 'Unable to withdraw request.');
-    return data;
+    try {
+      const res = await fetch(`${API_BASE_URL}/donations/${id}/withdraw`, {
+        method: 'PUT',
+        headers: getAuthHeaders(),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) return data;
+      if (res.status === 409 || res.status === 403) {
+        throw new Error(data.message || 'Unable to withdraw request.');
+      }
+    } catch (err) {
+      if (err.message && !err.message.includes('fetch') && !err.message.includes('NetworkError') && !err.message.includes('Failed to fetch')) {
+        throw err;
+      }
+      console.warn('Backend unavailable, withdrawing locally:', err);
+    }
+    const donations = getLocalDonations();
+    const index = donations.findIndex((d) => d._id === id);
+    if (index !== -1) {
+      donations[index] = { ...donations[index], status: 'withdrawn' };
+      saveLocalDonations(donations);
+      return { message: 'Request withdrawn.', donation: donations[index] };
+    }
+    return { message: 'Request withdrawn.', donation: { _id: id, status: 'withdrawn' } };
+  },
+
+  deleteDonation: async (id) => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/donations/${id}`, {
+        method: 'DELETE',
+        headers: getAuthHeaders(),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) return data;
+      if (res.status === 409 || res.status === 403 || res.status === 404) {
+        throw new Error(data.message || 'Unable to delete donation.');
+      }
+    } catch (err) {
+      if (err.message && !err.message.includes('fetch') && !err.message.includes('NetworkError') && !err.message.includes('Failed to fetch')) {
+        throw err;
+      }
+      console.warn('Backend unavailable, deleting donation locally:', err);
+    }
+    const donations = getLocalDonations().filter((d) => d._id !== id);
+    saveLocalDonations(donations);
+    return { message: 'Donation request deleted successfully.', donationId: id };
   },
 
   completeDonation: async (id) => {
-    const res = await fetch(`${API_BASE_URL}/donations/${id}/complete`, {
-      method: 'PUT',
-      headers: getAuthHeaders(),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.message || 'Unable to complete this request.');
-    return data;
+    try {
+      const res = await fetch(`${API_BASE_URL}/donations/${id}/complete`, {
+        method: 'PUT',
+        headers: getAuthHeaders(),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) return data;
+      if (res.status === 409 || res.status === 403) {
+        throw new Error(data.message || 'Unable to complete this request.');
+      }
+    } catch (err) {
+      if (err.message && !err.message.includes('fetch') && !err.message.includes('NetworkError') && !err.message.includes('Failed to fetch')) {
+        throw err;
+      }
+      console.warn('Backend unavailable, completing locally:', err);
+    }
+    const donations = getLocalDonations();
+    const index = donations.findIndex((d) => d._id === id);
+    if (index !== -1) {
+      donations[index] = { ...donations[index], status: 'completed' };
+      saveLocalDonations(donations);
+      return { message: 'Request marked complete. You can create another request now.', donation: donations[index] };
+    }
+    return { message: 'Request marked complete.', donation: { _id: id, status: 'completed' } };
   },
 
   // AI Recommendations

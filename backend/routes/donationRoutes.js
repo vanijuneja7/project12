@@ -9,6 +9,8 @@ const {
   declineDonation,
   retakeDonation,
   withdrawDonation,
+  deleteDonation,
+  simulateAcceptDonation,
   completeDonation,
   getPublicMapMarkers,
 } = require('../controllers/donationController');
@@ -25,10 +27,13 @@ router.get('/my-donations', getMyDonations);
 
 // NGO endpoints
 router.get('/ngo-feed', getNgoFeed);
+// Donation action endpoints
 router.put('/:id/accept', acceptDonation);
+router.put('/:id/simulate-accept', simulateAcceptDonation);
 router.put('/:id/decline', declineDonation);
 router.put('/:id/retake', retakeDonation);
 router.put('/:id/withdraw', withdrawDonation);
+router.delete('/:id', deleteDonation);
 router.put('/:id/complete', completeDonation);
 
 module.exports = router;
