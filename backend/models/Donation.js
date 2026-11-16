@@ -60,6 +60,14 @@ const DonationSchema = new mongoose.Schema(
       type: Number,
       default: null,
     },
+    declinedBy: [{
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+    }],
+    lastDeclinedAt: {
+      type: Date,
+      default: null,
+    },
   },
   { timestamps: true }
 );

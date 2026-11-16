@@ -11,6 +11,54 @@ const releaseDonationSlot = (donorId, donationId) => User.updateOne(
   { $set: { activeDonationId: null }, $unset: { activeDonationLockedAt: 1 } }
 );
 
+let legacyDeclinesRecovered = false;
+let legacyDeclineRecoveryPromise = null;
+
+const recoverLegacyDeclinedRequests = async () => {
+  if (legacyDeclinesRecovered) return;
+  if (legacyDeclineRecoveryPromise) return legacyDeclineRecoveryPromise;
+
+  legacyDeclineRecoveryPromise = (async () => {
+    const donorsWithActiveRequests = await Donation.distinct('donor', {
+      status: { $in: ACTIVE_DONATION_STATUSES },
+    });
+    const query = { status: 'declined' };
+    if (donorsWithActiveRequests.length) query.donor = { $nin: donorsWithActiveRequests };
+
+    const oldDeclines = await Donation.find(query)
+      .sort({ createdAt: -1 })
+      .select('_id donor')
+      .lean();
+    const donorsSeen = new Set();
+    const requestIdsToReopen = [];
+    oldDeclines.forEach((request) => {
+      const donorId = request.donor.toString();
+      if (!donorsSeen.has(donorId)) {
+        donorsSeen.add(donorId);
+        requestIdsToReopen.push(request._id);
+      }
+    });
+
+    if (requestIdsToReopen.length) {
+      await Donation.updateMany(
+        { _id: { $in: requestIdsToReopen }, status: 'declined' },
+        {
+          $set: { status: 'pending', assignedNgo: null, declinedBy: [] },
+          $unset: { acceptanceTravelMinutes: 1 },
+        }
+      );
+    }
+    legacyDeclinesRecovered = true;
+  })();
+
+  try {
+    await legacyDeclineRecoveryPromise;
+  } catch (error) {
+    legacyDeclineRecoveryPromise = null;
+    throw error;
+  }
+};
+
 // @desc    Create a new surplus food donation request
 // @route   POST /api/donations
 // @access  Private (Donor only)
@@ -19,6 +67,8 @@ exports.createDonation = async (req, res) => {
     if (req.user.role !== 'donor') {
       return res.status(403).json({ message: 'Only donors can create food requests.' });
     }
+
+    await recoverLegacyDeclinedRequests();
 
     const {
       foodType,
@@ -128,8 +178,10 @@ exports.createDonation = async (req, res) => {
 // @access  Private (Donor only)
 exports.getMyDonations = async (req, res) => {
   try {
+    await recoverLegacyDeclinedRequests();
     const donations = await Donation.find({ donor: req.user.id })
       .populate('assignedNgo', 'name email phone address city ngoCapacity')
+      .populate('declinedBy', 'name')
       .sort({ createdAt: -1 });
 
     // Privacy rule: Only reveal NGO phone number if the request is 'accepted'
@@ -156,10 +208,15 @@ exports.getNgoFeed = async (req, res) => {
       return res.status(403).json({ message: 'Only NGOs can access this feed.' });
     }
 
+    await recoverLegacyDeclinedRequests();
+
     // Show requests that are assigned to this NGO or open to all NGOs
     const donations = await Donation.find({
-      $or: [{ assignedNgo: req.user.id }, { assignedNgo: null }],
-      status: { $in: ['pending', 'accepted'] },
+      $and: [
+        { $or: [{ assignedNgo: req.user.id }, { assignedNgo: null }] },
+        { status: { $in: ['pending', 'accepted'] } },
+        { declinedBy: { $ne: req.user.id } },
+      ],
     })
       .populate('donor', 'name email phone address city donorType')
       .sort({ createdAt: -1 });
@@ -279,17 +336,19 @@ exports.declineDonation = async (req, res) => {
       return res.status(403).json({ message: 'This request is reserved for another NGO.' });
     }
 
-    // Set status to declined and release NGO assignment so other NGOs can see it if needed
+    // Return the request to the open feed for other NGOs and keep it active for the donor.
     const declined = await Donation.findOneAndUpdate(
       { _id: donation._id, status: 'pending' },
-      { $set: { status: 'declined', assignedNgo: null } },
+      {
+        $set: { assignedNgo: null, lastDeclinedAt: new Date() },
+        $addToSet: { declinedBy: req.user.id },
+      },
       { new: true }
     );
     if (!declined) return res.status(409).json({ message: 'This request has already changed.' });
-    await releaseDonationSlot(declined.donor, declined._id);
 
     res.json({
-      message: 'Request declined successfully.',
+      message: 'Request declined. It is open for other NGOs and remains active on the donor account.',
       donation: declined,
     });
   } catch (error) {

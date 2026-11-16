@@ -268,6 +268,30 @@ export default function App() {
     if (Array.isArray(res)) setNgoFeed(res);
   };
 
+  // Keep request status current while the dashboard is open on both sides.
+  useEffect(() => {
+    if (!user || currentPage !== 'dashboard') return undefined;
+
+    const refreshRequests = () => {
+      if (user.role === 'donor') {
+        api.getMyDonations().then((res) => {
+          if (Array.isArray(res)) setMyDonations(res);
+        }).catch(() => {});
+      } else if (user.role === 'ngo') {
+        api.getNgoFeed().then((res) => {
+          if (Array.isArray(res)) setNgoFeed(res);
+        }).catch(() => {});
+      }
+    };
+
+    const intervalId = window.setInterval(refreshRequests, 15000);
+    window.addEventListener('focus', refreshRequests);
+    return () => {
+      window.clearInterval(intervalId);
+      window.removeEventListener('focus', refreshRequests);
+    };
+  }, [user, currentPage]);
+
   // Auth Handlers
   const handleAuthSubmit = async (e) => {
     e.preventDefault();
@@ -2212,6 +2236,11 @@ export default function App() {
                           </div>
                         ) : (
                           <div className="privacy-box">
+                            {item.declinedBy?.length > 0 && (
+                              <p style={{ marginBottom: 8, color: '#92400e', fontWeight: 600 }}>
+                                Declined by {item.declinedBy.map((ngo) => ngo.name).filter(Boolean).join(', ')}. Your request is still open for other NGOs.
+                              </p>
+                            )}
                             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontWeight: 700 }}>
                               <IconLock /> Mutual Privacy Shield Active
                             </span>
